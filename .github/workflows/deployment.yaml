@@ -1,0 +1,76 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20.9.0'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        # cache: 'npm'
+
+    - name: Install dependencies
+      run: npm i
+
+    # - name: Run tests
+    #   run: npm test
+
+    - name: Build application
+      run: npm run build
+
+    # - name: Create deployment package
+    #   run: |
+    #     mkdir -p deployment
+    #     cp -r dist deployment/
+    #     cp -r node_modules deployment/
+    #     cp package*.json deployment/
+    #     cp docker-compose.production.yaml deployment/
+    #     cp Dockerfile.production deployment/
+    #     cp wait-for-it.sh deployment/
+    #     cp startup.document.dev.sh deployment/
+    #     cp env-production-mongodb deployment/.env
+    #     mkdir -p deployment/uploads deployment/logs deployment/nginx/ssl deployment/database/backups
+    #     tar -czf deployment.tar.gz deployment/
+
+    - name: Tar build files
+      run: tar -czf build.tar.gz dist Dockerfile.production node_modules
+
+    - name: Deploy to remote server
+      uses: appleboy/scp-action@v0.1.4
+      with:
+        host: ${{ secrets.REMOTE_HOST }}
+        username: ${{ secrets.REMOTE_USERNAME }}
+        key: ${{ secrets.REMOTE_SSH_KEY }}
+        source: build.tar.gz
+        target: /tmp
+
+    - name: Deploy to server
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.REMOTE_HOST }}
+        username: ${{ secrets.REMOTE_USERNAME }}
+        key: ${{ secrets.REMOTE_SSH_KEY }}
+        script: |
+          # Extract the build files to the deployment directory
+          tar -xzf /tmp/build.tar.gz -C ~root/cdbmp_maps/backend
+          cp ~root/cdbmp_maps/backend/Dockerfile.production ~root/cdbmp_maps/backend/Dockerfile
+          rm ~root/cdbmp_maps/backend/Dockerfile.production
+          rm /tmp/build.tar.gz
+
+          # Build and restart the Docker container
+          cd ~root/cdbmp_maps
+          docker-compose up -d --build backend
