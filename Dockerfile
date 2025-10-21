@@ -1,22 +1,48 @@
-FROM node:22.16.0-alpine
+# Build stage
+FROM node:22.16.0-alpine AS builder
 
-RUN apk add --no-cache bash
-RUN npm i -g @nestjs/cli typescript ts-node
+# Set working directory
+WORKDIR /app
 
-COPY package*.json /tmp/app/
-RUN cd /tmp/app && npm install
+# Copy package files
+COPY package*.json ./
 
-COPY . /usr/src/app
-RUN cp -a /tmp/app/node_modules /usr/src/app
-COPY ./wait-for-it.sh /opt/wait-for-it.sh
-RUN chmod +x /opt/wait-for-it.sh
-COPY ./startup.relational.dev.sh /opt/startup.relational.dev.sh
-RUN chmod +x /opt/startup.relational.dev.sh
-RUN sed -i 's/\r//g' /opt/wait-for-it.sh
-RUN sed -i 's/\r//g' /opt/startup.relational.dev.sh
+# Install all dependencies for building (skip prepare script for Docker)
+RUN npm ci --ignore-scripts && npm cache clean --force
 
-WORKDIR /usr/src/app
-RUN if [ ! -f .env ]; then cp env-example-relational .env; fi
+# Copy source code
+COPY . .
+
+# Build the application
 RUN npm run build
 
-CMD ["/opt/startup.relational.dev.sh"]
+# Production stage
+FROM node:22.16.0-alpine AS production
+
+# Install dumb-init for proper signal handling
+RUN apk add --no-cache dumb-init
+
+# Create app user
+# RUN addgroup -g 1001 -S nodejs
+# RUN adduser -S nestjs -u 1001
+
+# Set working directory
+WORKDIR /app
+
+# Copy built application from builder stage
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package*.json ./
+
+# Switch to non-root user
+# USER nestjs
+
+# Expose port
+EXPOSE 80
+
+# # Health check
+# HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+#   CMD node -e "require('http').get('http://localhost:3000/api/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
+
+# Start the application
+CMD ["dumb-init", "node", "dist/main"]
