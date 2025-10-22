@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { MapAreasSeedModule } from './Areas/map-areas-seed.module';
+import { MapAddressesSeedModule } from './Addresses/map-addresses-seed.module';
 import appConfig from '../../../config/app.config';
 import databaseConfig from '../../config/database.config';
 import { MongooseConfigService } from '../../mongoose-config.service';
@@ -9,6 +10,7 @@ import { MongooseConfigService } from '../../mongoose-config.service';
 @Module({
   imports: [
     MapAreasSeedModule,
+    MapAddressesSeedModule,
     ConfigModule.forRoot({
       isGlobal: true,
       load: [databaseConfig, appConfig],
