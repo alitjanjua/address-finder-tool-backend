@@ -1,15 +1,20 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { MapAreasController } from './areas/map-areas.controller';
-import { MapAreasService } from './areas/map-areas.service';
-import { MapArea, MapAreaSchema } from './areas/schemas/map-area.schema';
+import { MapAddressesController } from './addresses/map-addresses.controller';
+import { MapAddressesService } from './addresses/map-addresses.service';
+import {
+  MapAddress,
+  MapAddressSchema,
+} from './addresses/schemas/map-address.schema';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: MapArea.name, schema: MapAreaSchema }]),
+    MongooseModule.forFeature([
+      { name: MapAddress.name, schema: MapAddressSchema },
+    ]),
   ],
-  controllers: [MapAreasController],
-  providers: [MapAreasService],
-  exports: [MapAreasService],
+  controllers: [MapAddressesController],
+  providers: [MapAddressesService],
+  exports: [MapAddressesService],
 })
 export class MapModule {}
