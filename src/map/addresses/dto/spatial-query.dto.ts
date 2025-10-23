@@ -53,26 +53,6 @@ export class MultiPolygonDto {
   coordinates: number[][][][];
 }
 
-export class WithinPolygonRequestDto {
-  @ApiProperty({
-    description: 'Polygon or MultiPolygon geometry',
-    oneOf: [
-      { $ref: '#/components/schemas/PolygonDto' },
-      { $ref: '#/components/schemas/MultiPolygonDto' },
-    ],
-  })
-  polygon: PolygonDto | MultiPolygonDto;
-
-  @ApiPropertyOptional({
-    description: 'Additional filters to apply',
-    type: MapAddressesFilterDto,
-  })
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => MapAddressesFilterDto)
-  filters?: MapAddressesFilterDto;
-}
-
 export class NearPointRequestDto {
   @ApiProperty({
     description: 'Point coordinates [longitude, latitude]',
@@ -101,4 +81,22 @@ export class NearPointRequestDto {
   @ValidateNested()
   @Type(() => MapAddressesFilterDto)
   filters?: MapAddressesFilterDto;
+}
+
+// Query parameter DTOs for GET requests
+export class WithinPolygonQueryDto {
+  @ApiProperty({
+    description: 'Polygon or MultiPolygon geometry as JSON string',
+    example:
+      '{"type":"Polygon","coordinates":[[[6.8,53.3],[6.9,53.3],[6.9,53.4],[6.8,53.4],[6.8,53.3]]]}',
+  })
+  @IsOptional()
+  polygon: string;
+
+  @ApiPropertyOptional({
+    description: 'Additional filters as JSON string',
+    example: '{"city":"Amsterdam","postcode":"1012"}',
+  })
+  @IsOptional()
+  filters?: string;
 }

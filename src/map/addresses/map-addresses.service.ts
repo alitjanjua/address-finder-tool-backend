@@ -5,6 +5,7 @@ import { MapAddressesFilterDto } from './dto/map-addresses-filter.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
 import { MapAddressResponseDto } from './dto/map-address-response.dto';
 import { MapAddress, MapAddressDocument } from './schemas/map-address.schema';
+import { MultiPolygonDto, PolygonDto } from './dto/spatial-query.dto';
 
 @Injectable()
 export class MapAddressesService {
@@ -115,7 +116,7 @@ export class MapAddressesService {
   }
 
   async getAddressesWithinPolygon(
-    polygon: any,
+    polygon: PolygonDto | MultiPolygonDto,
     additionalFilters?: MapAddressesFilterDto,
   ): Promise<MapAddressResponseDto> {
     try {

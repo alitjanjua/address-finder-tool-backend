@@ -5,7 +5,7 @@ import { MapAddressesFilterDto } from './dto/map-addresses-filter.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
 import { MapAddressResponseDto } from './dto/map-address-response.dto';
 import {
-  WithinPolygonRequestDto,
+  WithinPolygonQueryDto,
   NearPointRequestDto,
 } from './dto/spatial-query.dto';
 
@@ -37,14 +37,21 @@ export class MapAddressesController {
     description: 'Returns addresses within the specified polygon',
     type: MapAddressResponseDto,
   })
-  @Post('within-polygon')
+  @Get('within-polygon')
   async getAddressesWithinPolygon(
-    @Body() body: WithinPolygonRequestDto,
+    @Query() query: WithinPolygonQueryDto,
   ): Promise<MapAddressResponseDto> {
-    return this.mapAddressesService.getAddressesWithinPolygon(
-      body.polygon,
-      body.filters,
-    );
+    try {
+      const polygon = JSON.parse(query.polygon);
+      const filters = query.filters ? JSON.parse(query.filters) : {};
+
+      return this.mapAddressesService.getAddressesWithinPolygon(
+        polygon,
+        filters,
+      );
+    } catch {
+      throw new Error('Invalid JSON in query parameters');
+    }
   }
 
   @ApiOperation({ summary: 'Get addresses near a point' })
