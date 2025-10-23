@@ -57,6 +57,12 @@ export const MapAddressSchema = SchemaFactory.createForClass(MapAddress);
 // Create 2dsphere index for efficient spatial queries
 MapAddressSchema.index({ geometry: '2dsphere' });
 
+// Create unique index on properties.id to prevent duplicates
+MapAddressSchema.index({ 'properties.id': 1 }, { unique: true });
+
+// Create unique index on properties.hash as secondary unique identifier
+MapAddressSchema.index({ 'properties.hash': 1 }, { unique: true });
+
 // Create compound indexes for common query patterns
 MapAddressSchema.index({ 'properties.city': 1, geometry: '2dsphere' });
 MapAddressSchema.index({ 'properties.postcode': 1, geometry: '2dsphere' });
