@@ -12,7 +12,7 @@ import {
 @Injectable()
 export class MapAddressesSeedService {
   private readonly readFileAsync = promisify(fs.readFile);
-  private readonly CHUNK_SIZE = 100; // Process 100 features at a time to reduce memory usage
+  private readonly CHUNK_SIZE = 1000; // Process 1000 features at a time to reduce memory usage
 
   constructor(
     @InjectModel(MapAddress.name)
@@ -236,16 +236,6 @@ export class MapAddressesSeedService {
           continue;
         }
 
-        // Check if address already exists by ID
-        const existingAddress = await this.mapAddressModel.findOne({
-          'properties.id': feature.properties.id,
-        });
-
-        if (existingAddress) {
-          skippedCount++;
-          continue;
-        }
-
         // Create address document
         const addressDoc = {
           type: feature.type,
@@ -266,9 +256,17 @@ export class MapAddressesSeedService {
           },
         };
 
+        // Use upsert operation to handle duplicates efficiently
+        // This will insert if not exists, or update if exists (based on unique index)
         bulkOps.push({
-          insertOne: {
-            document: addressDoc,
+          updateOne: {
+            filter: {
+              'properties.id': feature.properties.id,
+            },
+            update: {
+              $setOnInsert: addressDoc, // Only set fields if inserting (not updating)
+            },
+            upsert: true,
           },
         });
       } catch (error) {
@@ -280,8 +278,9 @@ export class MapAddressesSeedService {
     // Execute bulk operation
     if (bulkOps.length > 0) {
       try {
-        await this.mapAddressModel.bulkWrite(bulkOps);
-        insertedCount += bulkOps.length;
+        const result = await this.mapAddressModel.bulkWrite(bulkOps);
+        insertedCount += result.upsertedCount || 0;
+        skippedCount += bulkOps.length - (result.upsertedCount || 0);
       } catch (error) {
         console.error(`Bulk write error: ${error.message}`);
         errorCount += bulkOps.length;
