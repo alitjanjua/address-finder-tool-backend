@@ -1,7 +1,6 @@
 import { Controller, Get, Post, Query, Body } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { MapAddressesService } from './map-addresses.service';
-import { MapAddressesFilterDto } from './dto/map-addresses-filter.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
 import { MapAddressResponseDto } from './dto/map-address-response.dto';
 import {
@@ -26,9 +25,9 @@ export class MapAddressesController {
   @Get()
   async getAddresses(
     @Query() searchQuery: SearchQueryDto,
-    @Query() filters: MapAddressesFilterDto,
+    @Query('limit') limit?: number,
   ): Promise<MapAddressResponseDto> {
-    return this.mapAddressesService.getAddresses(searchQuery, filters);
+    return this.mapAddressesService.getAddresses(searchQuery, limit);
   }
 
   @ApiOperation({ summary: 'Get addresses within a polygon or multipolygon' })

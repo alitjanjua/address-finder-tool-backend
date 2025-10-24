@@ -16,12 +16,11 @@ export class MapAddressesService {
 
   async getAddresses(
     searchQuery: SearchQueryDto,
-    filters: MapAddressesFilterDto,
+    limit: number = 100,
   ): Promise<MapAddressResponseDto> {
     try {
-      // Build MongoDB query based on search query and filters
+      // Build MongoDB query based on search query only
       const query: any = {};
-      const specificFilters: any = {};
 
       // Handle searchQuery - search across multiple fields
       if (searchQuery.searchQuery) {
@@ -38,65 +37,11 @@ export class MapAddressesService {
         ];
       }
 
-      // Build specific field filters separately
-      if (filters.city && filters.city.length > 0) {
-        const cityRegex = filters.city.map(
-          (city) => new RegExp(city.toLowerCase(), 'i'),
-        );
-        specificFilters['properties.city'] = { $in: cityRegex };
-      }
-
-      if (filters.street && filters.street.length > 0) {
-        const streetRegex = filters.street.map(
-          (street) => new RegExp(street.toLowerCase(), 'i'),
-        );
-        specificFilters['properties.street'] = { $in: streetRegex };
-      }
-
-      if (filters.postcode && filters.postcode.length > 0) {
-        const postcodeRegex = filters.postcode.map(
-          (postcode) => new RegExp(postcode.toLowerCase(), 'i'),
-        );
-        specificFilters['properties.postcode'] = { $in: postcodeRegex };
-      }
-
-      if (filters.district && filters.district.length > 0) {
-        const districtRegex = filters.district.map(
-          (district) => new RegExp(district.toLowerCase(), 'i'),
-        );
-        specificFilters['properties.district'] = { $in: districtRegex };
-      }
-
-      if (filters.region && filters.region.length > 0) {
-        const regionRegex = filters.region.map(
-          (region) => new RegExp(region.toLowerCase(), 'i'),
-        );
-        specificFilters['properties.region'] = { $in: regionRegex };
-      }
-
-      if (filters.number) {
-        specificFilters['properties.number'] = {
-          $regex: filters.number,
-          $options: 'i',
-        };
-      }
-
-      // Combine searchQuery and specific filters properly
-      if (Object.keys(specificFilters).length > 0) {
-        if (query.$or) {
-          // Both searchQuery and specific filters: use $and to combine them
-          query.$and = [{ $or: query.$or }, specificFilters];
-          delete query.$or;
-        } else {
-          // Only specific filters
-          Object.assign(query, specificFilters);
-        }
-      }
-
-      // Get filtered addresses from MongoDB
+      // Get addresses from MongoDB with limit for better performance
       const addresses = await this.mapAddressModel
         .find(query)
         .select('_id type geometry properties')
+        .limit(limit)
         .lean()
         .exec();
 
