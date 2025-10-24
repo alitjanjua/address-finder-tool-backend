@@ -39,15 +39,11 @@ export class MapAddressesController {
   @Get('within-polygon')
   async getAddressesWithinPolygon(
     @Query() query: WithinPolygonQueryDto,
+    @Query('limit') limit?: number,
   ): Promise<MapAddressResponseDto> {
     try {
       const polygon = JSON.parse(query.polygon);
-      const filters = query.filters ? JSON.parse(query.filters) : {};
-
-      return this.mapAddressesService.getAddressesWithinPolygon(
-        polygon,
-        filters,
-      );
+      return this.mapAddressesService.getAddressesWithinPolygon(polygon, limit);
     } catch {
       throw new Error('Invalid JSON in query parameters');
     }

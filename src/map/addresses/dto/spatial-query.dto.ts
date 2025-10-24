@@ -92,11 +92,4 @@ export class WithinPolygonQueryDto {
   })
   @IsOptional()
   polygon: string;
-
-  @ApiPropertyOptional({
-    description: 'Additional filters as JSON string',
-    example: '{"city":"Amsterdam","postcode":"1012"}',
-  })
-  @IsOptional()
-  filters?: string;
 }
