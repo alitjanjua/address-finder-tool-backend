@@ -64,6 +64,6 @@ MapAddressSchema.index({ 'properties.id': 1 }, { unique: true });
 MapAddressSchema.index({ 'properties.hash': 1 }, { unique: true });
 
 // Create compound indexes for common query patterns
-MapAddressSchema.index({ 'properties.city': 1, geometry: '2dsphere' });
-MapAddressSchema.index({ 'properties.postcode': 1, geometry: '2dsphere' });
+MapAddressSchema.index({ 'properties.city': 1 });
+MapAddressSchema.index({ 'properties.postcode': 1 });
 MapAddressSchema.index({ 'properties.street': 1 });
