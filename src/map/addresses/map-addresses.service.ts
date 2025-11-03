@@ -5,7 +5,11 @@ import { MapAddressesFilterDto } from './dto/map-addresses-filter.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
 import { MapAddressResponseDto } from './dto/map-address-response.dto';
 import { MapAddress, MapAddressDocument } from './schemas/map-address.schema';
-import { MultiPolygonDto, PolygonDto } from './dto/spatial-query.dto';
+import {
+  MultiPolygonDto,
+  PolygonDto,
+  WithinRegionRequestDto,
+} from './dto/spatial-query.dto';
 
 @Injectable()
 export class MapAddressesService {
@@ -97,6 +101,131 @@ export class MapAddressesService {
         `Failed to fetch addresses within polygon: ${error.message}`,
       );
     }
+  }
+
+  // New POST-based region method: accepts WKT or map bounds
+  async getAddressesWithinRegion(
+    body: WithinRegionRequestDto,
+  ): Promise<MapAddressResponseDto> {
+    try {
+      const limit = body.limit ?? 1000;
+
+      // Decide the geometry source
+      let region: PolygonDto | MultiPolygonDto | undefined;
+
+      if (body.searchRegion) {
+        region = this.parseWktRegion(body.searchRegion);
+      } else if (body.mapbounds) {
+        region = this.buildPolygonFromBounds(body.mapbounds);
+      }
+
+      if (!region) {
+        throw new Error(
+          'Either searchRegion (WKT POLYGON/MULTIPOLYGON) or mapbounds must be provided.',
+        );
+      }
+
+      const query: any = {
+        geometry: {
+          $geoWithin: {
+            $geometry: region,
+          },
+        },
+      };
+
+      const addresses = await this.mapAddressModel
+        .find(query)
+        .hint('geometry_2dsphere')
+        .select('_id type geometry properties')
+        .limit(limit)
+        .lean()
+        .exec();
+
+      const features =
+        addresses?.map((address) => ({
+          ...address,
+          _id: address._id?.toString(),
+        })) || [];
+
+      return { type: 'FeatureCollection', features };
+    } catch (error) {
+      throw new Error(
+        `Failed to fetch addresses within region: ${error.message}`,
+      );
+    }
+  }
+
+  // Minimal WKT parser for POLYGON and MULTIPOLYGON
+  private parseWktRegion(wkt: string): PolygonDto | MultiPolygonDto {
+    const trimmed = wkt.trim();
+    const upper = trimmed.toUpperCase();
+
+    if (upper.startsWith('POLYGON')) {
+      // POLYGON((lon lat, lon lat, ...)) possibly with inner rings
+      const ringsStr = trimmed
+        .replace(/^\s*POLYGON\s*\(\(/i, '')
+        .replace(/\)\)\s*$/i, '');
+
+      const ringParts = this.splitRings(ringsStr);
+      const rings = ringParts.map((part) => this.parseCoordinates(part));
+
+      return { type: 'Polygon', coordinates: rings };
+    }
+
+    if (upper.startsWith('MULTIPOLYGON')) {
+      // MULTIPOLYGON(((...)),((...)))
+      const polysStr = trimmed
+        .replace(/^\s*MULTIPOLYGON\s*\(\(\(/i, '')
+        .replace(/\)\)\)\s*$/i, '');
+
+      // Split polygons by ')),((', then parse rings within each
+      const polygonParts = polysStr.split(/\)\)\s*,\s*\(\(/);
+      const polygons = polygonParts.map((polyStr) => {
+        const ringParts = this.splitRings(polyStr);
+        const rings = ringParts.map((part) => this.parseCoordinates(part));
+        return rings;
+      });
+
+      return { type: 'MultiPolygon', coordinates: polygons };
+    }
+
+    throw new Error('Unsupported WKT type. Use POLYGON or MULTIPOLYGON.');
+  }
+
+  private splitRings(ringsStr: string): string[] {
+    // Split by '),(' between rings; be tolerant to spaces
+    return ringsStr.split(/\)\s*,\s*\(/);
+  }
+
+  private parseCoordinates(coordsStr: string): number[][] {
+    // Split by comma into points, each point is "lon lat"
+    return coordsStr.split(/\s*,\s*/).map((pair) => {
+      const [lonStr, latStr] = pair.trim().split(/\s+/);
+      const lon = parseFloat(lonStr);
+      const lat = parseFloat(latStr);
+      if (Number.isNaN(lon) || Number.isNaN(lat)) {
+        throw new Error(`Invalid coordinate in WKT: ${pair}`);
+      }
+      return [lon, lat];
+    });
+  }
+
+  private buildPolygonFromBounds(bounds: {
+    east: number;
+    west: number;
+    north: number;
+    south: number;
+  }): PolygonDto {
+    const { east, west, north, south } = bounds;
+    const ring: number[][] = [
+      [west, south],
+      [east, south],
+      [east, north],
+      [west, north],
+      [west, south], // close ring
+    ];
+
+    return { type: 'Polygon', coordinates: [ring] };
   }
 
   async getAddressesNearPoint(

@@ -83,6 +83,39 @@ export class NearPointRequestDto {
   filters?: MapAddressesFilterDto;
 }
 
+// New DTO for POST-based region query
+export class WithinRegionRequestDto {
+  @ApiPropertyOptional({
+    description:
+      'WKT string representing a POLYGON or MULTIPOLYGON. Example: POLYGON((lon lat, ...))',
+    example:
+      'POLYGON((-118.25474027440879 34.222418907924144, -118.25748685620879 34.215605510930345, -118.26160672890876 34.206520124511734, -118.2684731834087 34.19516201418956, -118.27533963790867 34.183802373759455, -118.28220609240864 34.17244120346186, -118.2876992560086 34.16335116588097))',
+  })
+  @IsOptional()
+  searchRegion?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Map bounds with east, west, north, south to build a rectangle polygon',
+    example: { east: -118.25, west: -118.29, north: 34.22, south: 34.16 },
+  })
+  @IsOptional()
+  mapbounds?: {
+    east: number;
+    west: number;
+    north: number;
+    south: number;
+  };
+
+  @ApiPropertyOptional({
+    description: 'Maximum number of features to return',
+    default: 1000,
+  })
+  @IsOptional()
+  @IsNumber()
+  limit?: number;
+}
+
 // Query parameter DTOs for GET requests
 export class WithinPolygonQueryDto {
   @ApiProperty({
