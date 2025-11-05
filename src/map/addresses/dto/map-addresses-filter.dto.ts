@@ -1,10 +1,10 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsArray, IsNumber } from 'class-validator';
+import { IsOptional, IsString, IsArray } from 'class-validator';
 import { Transform } from 'class-transformer';
 
-export class MapAreasFilterDto {
+export class MapAddressesFilterDto {
   @ApiPropertyOptional({
-    description: 'Filter by area name(s)',
+    description: 'Filter by city name(s)',
     type: [String],
   })
   @IsOptional()
@@ -16,10 +16,10 @@ export class MapAreasFilterDto {
   })
   @IsArray()
   @IsString({ each: true })
-  area?: string[];
+  city?: string[];
 
   @ApiPropertyOptional({
-    description: 'Filter by intervention type(s)',
+    description: 'Filter by street name(s)',
     type: [String],
   })
   @IsOptional()
@@ -31,32 +31,10 @@ export class MapAreasFilterDto {
   })
   @IsArray()
   @IsString({ each: true })
-  intervention?: string[];
-
-  @ApiPropertyOptional({ description: 'Minimum budget value' })
-  @IsOptional()
-  @Transform(({ value }) => {
-    if (typeof value === 'string') {
-      return value === '' ? undefined : Number(value);
-    }
-    return value;
-  })
-  @IsNumber()
-  budget_min?: number;
-
-  @ApiPropertyOptional({ description: 'Maximum budget value' })
-  @IsOptional()
-  @Transform(({ value }) => {
-    if (typeof value === 'string') {
-      return value === '' ? undefined : Number(value);
-    }
-    return value;
-  })
-  @IsNumber()
-  budget_max?: number;
+  street?: string[];
 
   @ApiPropertyOptional({
-    description: 'Filter by Servizi Ecosistemici value(s)',
+    description: 'Filter by postcode(s)',
     type: [String],
   })
   @IsOptional()
@@ -68,10 +46,42 @@ export class MapAreasFilterDto {
   })
   @IsArray()
   @IsString({ each: true })
-  servizi_ecosistemici?: string[];
+  postcode?: string[];
 
-  @ApiPropertyOptional({ description: 'Filter by type' })
+  @ApiPropertyOptional({
+    description: 'Filter by district name(s)',
+    type: [String],
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      return value.split(',').map((item) => item.trim());
+    }
+    return value;
+  })
+  @IsArray()
+  @IsString({ each: true })
+  district?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Filter by region name(s)',
+    type: [String],
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      return value.split(',').map((item) => item.trim());
+    }
+    return value;
+  })
+  @IsArray()
+  @IsString({ each: true })
+  region?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Search by address number',
+  })
   @IsOptional()
   @IsString()
-  layerType?: string;
+  number?: string;
 }
