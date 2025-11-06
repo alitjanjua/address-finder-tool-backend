@@ -62,3 +62,21 @@ export class MapAddressResponseDto {
   @ApiProperty({ type: [AddressFeatureDto] })
   features: AddressFeatureDto[];
 }
+
+// Batch response variant that includes a continuation cursor
+export class MapAddressBatchResponseDto {
+  @ApiProperty({ description: 'GeoJSON FeatureCollection payload' })
+  geojson: MapAddressResponseDto;
+
+  @ApiProperty({
+    description: 'Opaque cursor for fetching the next batch',
+    example: '671a9c2f0c4a5e3a4dc0f123',
+  })
+  nextCursor: string | null;
+
+  @ApiProperty({
+    description: 'Indicates if more data may be available',
+    example: true,
+  })
+  hasMore: boolean;
+}
