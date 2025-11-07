@@ -117,7 +117,6 @@ export class MapAddressesService {
 
       const docs = await this.mapAddressModel
         .find(query)
-        .hint('geometry_2dsphere')
         .sort({ _id: 1 })
         .select('_id type geometry properties')
         .limit(batchSize)
