@@ -86,7 +86,7 @@ export class MapAddressesService {
     body: WithinRegionRequestDto,
   ): Promise<MapAddressBatchResponseDto> {
     try {
-      const batchSize = body.batchSize ?? body.limit ?? 1000;
+      const batchSize = body.batchSize ?? body.limit ?? 500;
 
       // Decide the geometry source
       let region: PolygonDto | MultiPolygonDto | undefined;
