@@ -29,19 +29,33 @@ export class MapAddressesService {
       // Build MongoDB query based on search query only
       const query: any = {};
 
-      // Handle searchQuery - search across multiple fields
+      // Handle searchQuery - match substrings across multiple fields
       if (searchQuery.searchQuery) {
-        const searchRegex = new RegExp(
-          searchQuery.searchQuery.toLowerCase(),
-          'i',
-        );
-        query.$or = [
-          { 'properties.city': searchRegex },
-          { 'properties.street': searchRegex },
-          { 'properties.postcode': searchRegex },
-          { 'properties.district': searchRegex },
-          { 'properties.region': searchRegex },
+        const raw = searchQuery.searchQuery.toLowerCase();
+        // Split on non-alphanumeric separators to support inputs like "App, gedam, pinge"
+        const terms = raw
+          .split(/[^a-z0-9]+/i)
+          .map((t) => t.trim())
+          .filter((t) => t.length > 0);
+
+        const fields = [
+          'properties.city',
+          'properties.street',
+          'properties.postcode',
+          'properties.district',
+          'properties.region',
         ];
+
+        const escapeRegExp = (s: string) =>
+          s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regexes = terms.map((t) => new RegExp(escapeRegExp(t), 'i'));
+
+        if (regexes.length > 0) {
+          // OR across all term-field combinations so any substring matches
+          query.$or = fields.flatMap((field) =>
+            regexes.map((rx) => ({ [field]: rx })),
+          );
+        }
       }
 
       // Get addresses from MongoDB with limit for better performance
