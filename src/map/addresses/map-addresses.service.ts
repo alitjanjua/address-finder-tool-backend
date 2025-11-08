@@ -1,9 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { MapAddressesFilterDto } from './dto/map-addresses-filter.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
-import { MapAddressResponseDto } from './dto/map-address-response.dto';
+import {
+  MapAddressBatchResponseDto,
+  MapAddressResponseDto,
+} from './dto/map-address-response.dto';
 import { MapAddress, MapAddressDocument } from './schemas/map-address.schema';
 import {
   MultiPolygonDto,
@@ -26,19 +29,33 @@ export class MapAddressesService {
       // Build MongoDB query based on search query only
       const query: any = {};
 
-      // Handle searchQuery - search across multiple fields
+      // Handle searchQuery - match substrings across multiple fields
       if (searchQuery.searchQuery) {
-        const searchRegex = new RegExp(
-          searchQuery.searchQuery.toLowerCase(),
-          'i',
-        );
-        query.$or = [
-          { 'properties.city': searchRegex },
-          { 'properties.street': searchRegex },
-          { 'properties.postcode': searchRegex },
-          { 'properties.district': searchRegex },
-          { 'properties.region': searchRegex },
+        const raw = searchQuery.searchQuery.toLowerCase();
+        // Split on non-alphanumeric separators to support inputs like "App, gedam, pinge"
+        const terms = raw
+          .split(/[^a-z0-9]+/i)
+          .map((t) => t.trim())
+          .filter((t) => t.length > 0);
+
+        const fields = [
+          'properties.city',
+          'properties.street',
+          'properties.postcode',
+          'properties.district',
+          'properties.region',
         ];
+
+        const escapeRegExp = (s: string) =>
+          s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regexes = terms.map((t) => new RegExp(escapeRegExp(t), 'i'));
+
+        if (regexes.length > 0) {
+          // OR across all term-field combinations so any substring matches
+          query.$or = fields.flatMap((field) =>
+            regexes.map((rx) => ({ [field]: rx })),
+          );
+        }
       }
 
       // Get addresses from MongoDB with limit for better performance
@@ -64,90 +81,61 @@ export class MapAddressesService {
     }
   }
 
-  async getAddressesWithinPolygon(
-    polygon: PolygonDto | MultiPolygonDto,
-    limit: number = 1000,
-  ): Promise<MapAddressResponseDto> {
-    try {
-      // Build MongoDB query with spatial filter
-      const query: any = {
-        geometry: {
-          $geoWithin: {
-            $geometry: polygon,
-          },
-        },
-      };
-
-      // Get addresses within polygon using spatial query with optimizations
-      const addresses = await this.mapAddressModel
-        .find(query)
-        .select('_id type geometry properties')
-        .limit(limit) // Limit results for better performance
-        .lean() // Use lean() for better performance (returns plain JS objects)
-        .exec();
-
-      const transformedAddresses =
-        addresses?.map((address) => ({
-          ...address,
-          _id: address._id?.toString(),
-        })) || [];
-
-      return {
-        type: 'FeatureCollection',
-        features: transformedAddresses,
-      };
-    } catch (error) {
-      throw new Error(
-        `Failed to fetch addresses within polygon: ${error.message}`,
-      );
-    }
-  }
-
   // New POST-based region method: accepts WKT or map bounds
-  async getAddressesWithinRegion(
+  async getAddressesWithinPolygon(
     body: WithinRegionRequestDto,
-  ): Promise<MapAddressResponseDto> {
+  ): Promise<MapAddressBatchResponseDto> {
     try {
-      const limit = body.limit ?? 1000;
+      const batchSize = body.batchSize ?? body.limit ?? 500;
 
       // Decide the geometry source
       let region: PolygonDto | MultiPolygonDto | undefined;
 
       if (body.searchRegion) {
         region = this.parseWktRegion(body.searchRegion);
-      } else if (body.mapbounds) {
-        region = this.buildPolygonFromBounds(body.mapbounds);
       }
 
       if (!region) {
         throw new Error(
-          'Either searchRegion (WKT POLYGON/MULTIPOLYGON) or mapbounds must be provided.',
+          'searchRegion (WKT POLYGON/MULTIPOLYGON) must be provided.',
         );
       }
 
       const query: any = {
-        geometry: {
-          $geoWithin: {
-            $geometry: region,
-          },
-        },
+        geometry: { $geoWithin: { $geometry: region } },
       };
 
-      const addresses = await this.mapAddressModel
+      // Cursor gating to avoid skip
+      if (body.cursor) {
+        if (!Types.ObjectId.isValid(body.cursor)) {
+          throw new Error(
+            'Invalid cursor value: must be a valid ObjectId string',
+          );
+        }
+        query._id = { $gt: new Types.ObjectId(body.cursor) };
+      }
+
+      const docs = await this.mapAddressModel
         .find(query)
-        .hint('geometry_2dsphere')
+        .sort({ _id: 1 })
         .select('_id type geometry properties')
-        .limit(limit)
+        .limit(batchSize)
         .lean()
         .exec();
 
       const features =
-        addresses?.map((address) => ({
-          ...address,
-          _id: address._id?.toString(),
-        })) || [];
+        docs?.map((d) => ({ ...d, _id: d._id?.toString() })) || [];
+      const last = docs.length ? docs[docs.length - 1]._id?.toString() : null;
+      const hasMore = docs.length === batchSize;
 
-      return { type: 'FeatureCollection', features };
+      return {
+        geojson: {
+          type: 'FeatureCollection',
+          features,
+        },
+        nextCursor: last ?? null,
+        hasMore,
+      };
     } catch (error) {
       throw new Error(
         `Failed to fetch addresses within region: ${error.message}`,
@@ -208,24 +196,6 @@ export class MapAddressesService {
       }
       return [lon, lat];
     });
-  }
-
-  private buildPolygonFromBounds(bounds: {
-    east: number;
-    west: number;
-    north: number;
-    south: number;
-  }): PolygonDto {
-    const { east, west, north, south } = bounds;
-    const ring: number[][] = [
-      [west, south],
-      [east, south],
-      [east, north],
-      [west, north],
-      [west, south], // close ring
-    ];
-
-    return { type: 'Polygon', coordinates: [ring] };
   }
 
   async getAddressesNearPoint(

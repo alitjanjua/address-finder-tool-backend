@@ -7,6 +7,7 @@ import {
   NearPointRequestDto,
   WithinRegionRequestDto,
 } from './dto/spatial-query.dto';
+import { MapAddressBatchResponseDto } from './dto/map-address-response.dto';
 
 @ApiTags('Map')
 @Controller({
@@ -27,20 +28,26 @@ export class MapAddressesController {
     @Query() searchQuery: SearchQueryDto,
     @Query('limit') limit?: number,
   ): Promise<MapAddressResponseDto> {
-    return this.mapAddressesService.getAddresses(searchQuery, limit);
+    const numericLimit = limit !== undefined ? Number(limit) : undefined;
+    return await this.mapAddressesService.getAddresses(
+      searchQuery,
+      numericLimit,
+    );
   }
 
-  @ApiOperation({ summary: 'Get addresses within a polygon or multipolygon' })
+  @ApiOperation({
+    summary: 'Get addresses within a WKT polygon or multipolygon',
+  })
   @ApiResponse({
     status: 200,
     description: 'Returns addresses within the specified polygon',
-    type: MapAddressResponseDto,
+    type: MapAddressBatchResponseDto,
   })
   @Post('within-polygon')
-  async getAddressesWithinPolygonPost(
+  async getAddressesWithinPolygon(
     @Body() body: WithinRegionRequestDto,
-  ): Promise<MapAddressResponseDto> {
-    return this.mapAddressesService.getAddressesWithinRegion(body);
+  ): Promise<MapAddressBatchResponseDto> {
+    return await this.mapAddressesService.getAddressesWithinPolygon(body);
   }
 
   @ApiOperation({ summary: 'Get addresses near a point' })
@@ -53,7 +60,7 @@ export class MapAddressesController {
   async getAddressesNearPoint(
     @Body() body: NearPointRequestDto,
   ): Promise<MapAddressResponseDto> {
-    return this.mapAddressesService.getAddressesNearPoint(
+    return await this.mapAddressesService.getAddressesNearPoint(
       body.point,
       body.maxDistance,
       body.filters,
