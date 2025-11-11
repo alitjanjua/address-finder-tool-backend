@@ -13,6 +13,7 @@ import {
   PolygonDto,
   WithinRegionRequestDto,
 } from './dto/spatial-query.dto';
+import stringSimilarity from 'string-similarity';
 
 @Injectable()
 export class MapAddressesService {
@@ -23,58 +24,122 @@ export class MapAddressesService {
 
   async getAddresses(
     searchQuery: SearchQueryDto,
-    limit: number = 100,
+    limit = 100,
   ): Promise<MapAddressResponseDto> {
     try {
-      // Build MongoDB query based on search query only
-      const query: any = {};
+      const { searchQuery: searchStr } = searchQuery;
+      const fields = [
+        'properties.street',
+        'properties.number',
+        'properties.postcode',
+        'properties.city',
+      ];
 
-      // Handle searchQuery - match substrings across multiple fields
-      if (searchQuery.searchQuery) {
-        const raw = searchQuery.searchQuery.toLowerCase();
-        // Split on non-alphanumeric separators to support inputs like "App, gedam, pinge"
-        const terms = raw
-          .split(/[^a-z0-9]+/i)
-          .map((t) => t.trim())
-          .filter((t) => t.length > 0);
-
-        const fields = [
-          'properties.city',
-          'properties.street',
-          'properties.postcode',
-          'properties.district',
-          'properties.region',
-        ];
-
-        const escapeRegExp = (s: string) =>
-          s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regexes = terms.map((t) => new RegExp(escapeRegExp(t), 'i'));
-
-        if (regexes.length > 0) {
-          // OR across all term-field combinations so any substring matches
-          query.$or = fields.flatMap((field) =>
-            regexes.map((rx) => ({ [field]: rx })),
-          );
-        }
+      // No search input → return early
+      if (!searchStr || !searchStr.trim()) {
+        return { type: 'FeatureCollection', features: [] };
       }
 
-      // Get addresses from MongoDB with limit for better performance
-      const addresses = await this.mapAddressModel
+      const normalizedSearch = searchStr.trim().toLowerCase();
+
+      // Tokenize search to allow multi-word precision filtering
+      const tokens = normalizedSearch
+        .split(/[^a-z0-9]+/i)
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0);
+
+      const escapeRegExp = (s: string) =>
+        s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+      // Build query: require all tokens to appear somewhere ($and of per-token $or)
+      const query =
+        tokens.length > 0
+          ? {
+              $and: tokens.map((t) => {
+                const rx = new RegExp(escapeRegExp(t), 'i');
+                return { $or: fields.map((f) => ({ [f]: rx })) };
+              }),
+            }
+          : { $or: [] };
+
+      // Pull a larger pool so we can rank them by similarity
+      const candidates = await this.mapAddressModel
         .find(query)
         .select('_id type geometry properties')
-        .limit(limit)
-        .lean()
-        .exec();
+        .limit(Math.max(limit * 2, 100))
+        .lean();
 
-      const transformedAddresses =
-        addresses?.map((address) => ({
-          ...address,
-          _id: address._id?.toString(),
-        })) || [];
+      if (candidates.length === 0) {
+        return { type: 'FeatureCollection', features: [] };
+      }
 
+      // Step 2️⃣: Compute similarity scores with field weighting and prefix boost
+      const scored = candidates.map((addr) => {
+        const street = String(addr.properties.street || '').toLowerCase();
+        const number = String(addr.properties.number || '').toLowerCase();
+        const postcode = String(addr.properties.postcode || '').toLowerCase();
+        const city = String(addr.properties.city || '').toLowerCase();
+
+        const combined = [street, number, postcode, city]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+
+        const combinedScore = stringSimilarity.compareTwoStrings(
+          normalizedSearch,
+          combined,
+        );
+
+        // Field-level scores with weights to emphasize street/city
+        const weights = { street: 1.0, city: 0.9, postcode: 0.8, number: 0.5 };
+        const fieldScores = [
+          stringSimilarity.compareTwoStrings(normalizedSearch, street) *
+            weights.street,
+          stringSimilarity.compareTwoStrings(normalizedSearch, city) *
+            weights.city,
+          stringSimilarity.compareTwoStrings(normalizedSearch, postcode) *
+            weights.postcode,
+          stringSimilarity.compareTwoStrings(normalizedSearch, number) *
+            weights.number,
+        ];
+        const maxFieldScore = Math.max(...fieldScores);
+
+        // Prefix boost when any field starts with the full query
+        const startsWith = [street, number, postcode, city].some((t) =>
+          t.startsWith(normalizedSearch),
+        );
+        const prefixBoost = startsWith ? 0.15 : 0;
+
+        const score = Math.min(
+          1,
+          Math.max(combinedScore, maxFieldScore) + prefixBoost,
+        );
+
+        return { ...addr, score };
+      });
+
+      // Step 3️⃣: Sort by similarity
+      scored.sort((a, b) => b.score - a.score);
+
+      // Step 4️⃣: Determine threshold
+      // If any candidate is a "close match" (e.g., score >= 0.75), use only those.
+      const bestScore = scored[0].score;
+      const threshold = 0.75;
+
+      const closeMatches =
+        bestScore >= threshold
+          ? scored
+              .filter((s) => s.score >= Math.max(0.7, bestScore - 0.08))
+              .slice(0, limit)
+          : scored.slice(0, limit); // fallback to broader substring/fuzzy matches
+
+      // Step 5️⃣: Transform response
       return {
         type: 'FeatureCollection',
-        features: transformedAddresses,
+        features: closeMatches.map((a) => ({
+          ...a,
+          _id: a._id.toString(),
+        })),
       };
     } catch (error) {
       throw new Error(`Failed to fetch map addresses: ${error.message}`);
