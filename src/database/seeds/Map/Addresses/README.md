@@ -16,6 +16,7 @@ This service provides functionality to seed the Map Addresses collection in Mong
 ```bash
 # Seed from a single file
 npm run seed:map-addresses file ./files/addresses.geojson
+npm run seed:map-addresses file ./files/addresses.featurecollection.geojson
 
 # Get collection statistics
 npm run seed:map-addresses stats
