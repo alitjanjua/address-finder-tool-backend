@@ -4,6 +4,9 @@ import { Model } from 'mongoose';
 import * as fs from 'fs';
 import * as path from 'path';
 import { promisify } from 'util';
+import { parser } from 'stream-json';
+import { pick } from 'stream-json/filters/Pick';
+import { streamArray } from 'stream-json/streamers/StreamArray';
 import {
   MapAddress,
   MapAddressDocument,
@@ -37,6 +40,19 @@ export class MapAddressesSeedService {
       let skippedCount = 0;
       let errorCount = 0;
       let processedLines = 0;
+
+      // Detect if the input file is a GeoJSON FeatureCollection
+      const isFeatureCollection = await this.isFeatureCollectionFile(fullPath);
+
+      if (isFeatureCollection) {
+        console.log('FeatureCollection detected; streaming features array...');
+        const result = await this.seedFromFeatureCollectionStream(fullPath);
+        return {
+          success: true,
+          message: `Address seeding from FeatureCollection completed. Inserted: ${result.inserted}, Skipped: ${result.skipped}, Errors: ${result.errors}`,
+          count: result.inserted,
+        };
+      }
 
       // For large files, read line by line
       if (fileSizeInMB > 100) {
@@ -216,6 +232,114 @@ export class MapAddressesSeedService {
         count: 0,
       };
     }
+  }
+
+  private async isFeatureCollectionFile(fullPath: string): Promise<boolean> {
+    try {
+      const fd = await fs.promises.open(fullPath, 'r');
+      try {
+        const { buffer, bytesRead } = await fd.read(
+          Buffer.alloc(4096),
+          0,
+          4096,
+          0,
+        );
+        const prefix = buffer.toString('utf8', 0, bytesRead);
+        return (
+          prefix.includes('"type":"FeatureCollection"') ||
+          prefix.includes('"type": "FeatureCollection"')
+        );
+      } finally {
+        await fd.close();
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  private async seedFromFeatureCollectionStream(
+    fullPath: string,
+  ): Promise<{ inserted: number; skipped: number; errors: number }> {
+    let insertedCount = 0;
+    let skippedCount = 0;
+    let errorCount = 0;
+
+    const featureChunk: any[] = [];
+    const CHUNK_SIZE = this.CHUNK_SIZE;
+
+    await new Promise<void>((resolve, reject) => {
+      const pipeline = fs
+        .createReadStream(fullPath)
+        .pipe(parser())
+        .pipe(pick({ filter: 'features' }))
+        .pipe(streamArray());
+
+      let chunkCounter = 0;
+
+      pipeline.on('data', async ({ value }) => {
+        try {
+          // Each value is a Feature object
+          featureChunk.push(value);
+          if (featureChunk.length >= CHUNK_SIZE) {
+            chunkCounter++;
+            const subChunks = this.chunkArray(
+              featureChunk.splice(0, featureChunk.length),
+              CHUNK_SIZE,
+            );
+            for (const subChunk of subChunks) {
+              const result = await this.processFeaturesChunk(subChunk);
+              insertedCount += result.inserted;
+              skippedCount += result.skipped;
+              errorCount += result.errors;
+            }
+            if (chunkCounter % 100 === 0) {
+              if (global.gc) {
+                global.gc();
+              }
+              console.log(
+                `Memory cleanup at chunk ${chunkCounter}. Inserted so far: ${insertedCount}`,
+              );
+            }
+          }
+        } catch (err) {
+          console.error(
+            'Error processing feature from stream:',
+            err?.message || err,
+          );
+          errorCount++;
+        }
+      });
+
+      pipeline.on('end', async () => {
+        try {
+          if (featureChunk.length > 0) {
+            const subChunks = this.chunkArray(
+              featureChunk.splice(0, featureChunk.length),
+              CHUNK_SIZE,
+            );
+            for (const subChunk of subChunks) {
+              const result = await this.processFeaturesChunk(subChunk);
+              insertedCount += result.inserted;
+              skippedCount += result.skipped;
+              errorCount += result.errors;
+            }
+          }
+          resolve();
+        } catch (e) {
+          reject(e);
+        }
+      });
+
+      pipeline.on('error', (e) => {
+        reject(e);
+      });
+    });
+
+    return {
+      inserted: insertedCount,
+      skipped: skippedCount,
+      errors: errorCount,
+    };
   }
 
   private async processFeaturesChunk(
