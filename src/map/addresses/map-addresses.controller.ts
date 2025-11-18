@@ -3,10 +3,7 @@ import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { MapAddressesService } from './map-addresses.service';
 import { SearchQueryDto } from './dto/search-query.dto';
 import { MapAddressResponseDto } from './dto/map-address-response.dto';
-import {
-  NearPointRequestDto,
-  WithinRegionRequestDto,
-} from './dto/spatial-query.dto';
+import { WithinRegionRequestDto } from './dto/spatial-query.dto';
 import { MapAddressBatchResponseDto } from './dto/map-address-response.dto';
 
 @ApiTags('Map')
@@ -48,22 +45,5 @@ export class MapAddressesController {
     @Body() body: WithinRegionRequestDto,
   ): Promise<MapAddressBatchResponseDto> {
     return await this.mapAddressesService.getAddressesWithinPolygon(body);
-  }
-
-  @ApiOperation({ summary: 'Get addresses near a point' })
-  @ApiResponse({
-    status: 200,
-    description: 'Returns addresses near the specified point',
-    type: MapAddressResponseDto,
-  })
-  @Post('near-point')
-  async getAddressesNearPoint(
-    @Body() body: NearPointRequestDto,
-  ): Promise<MapAddressResponseDto> {
-    return await this.mapAddressesService.getAddressesNearPoint(
-      body.point,
-      body.maxDistance,
-      body.filters,
-    );
   }
 }

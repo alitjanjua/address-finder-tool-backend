@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { MapAddressesFilterDto } from './dto/map-addresses-filter.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
 import {
   MapAddressBatchResponseDto,
@@ -261,97 +260,5 @@ export class MapAddressesService {
       }
       return [lon, lat];
     });
-  }
-
-  async getAddressesNearPoint(
-    point: [number, number],
-    maxDistance: number = 1000, // in meters
-    additionalFilters?: MapAddressesFilterDto,
-  ): Promise<MapAddressResponseDto> {
-    try {
-      // Build MongoDB query with spatial filter
-      const query: any = {
-        geometry: {
-          $near: {
-            $geometry: {
-              type: 'Point',
-              coordinates: point,
-            },
-            $maxDistance: maxDistance,
-          },
-        },
-      };
-
-      // Add additional filters if provided
-      if (additionalFilters) {
-        if (additionalFilters.city && additionalFilters.city.length > 0) {
-          const cityRegex = additionalFilters.city.map(
-            (city) => new RegExp(city.toLowerCase(), 'i'),
-          );
-          query['properties.city'] = { $in: cityRegex };
-        }
-
-        if (additionalFilters.street && additionalFilters.street.length > 0) {
-          const streetRegex = additionalFilters.street.map(
-            (street) => new RegExp(street.toLowerCase(), 'i'),
-          );
-          query['properties.street'] = { $in: streetRegex };
-        }
-
-        if (
-          additionalFilters.postcode &&
-          additionalFilters.postcode.length > 0
-        ) {
-          const postcodeRegex = additionalFilters.postcode.map(
-            (postcode) => new RegExp(postcode.toLowerCase(), 'i'),
-          );
-          query['properties.postcode'] = { $in: postcodeRegex };
-        }
-
-        if (
-          additionalFilters.district &&
-          additionalFilters.district.length > 0
-        ) {
-          const districtRegex = additionalFilters.district.map(
-            (district) => new RegExp(district.toLowerCase(), 'i'),
-          );
-          query['properties.district'] = { $in: districtRegex };
-        }
-
-        if (additionalFilters.region && additionalFilters.region.length > 0) {
-          const regionRegex = additionalFilters.region.map(
-            (region) => new RegExp(region.toLowerCase(), 'i'),
-          );
-          query['properties.region'] = { $in: regionRegex };
-        }
-
-        if (additionalFilters.number) {
-          query['properties.number'] = {
-            $regex: additionalFilters.number,
-            $options: 'i',
-          };
-        }
-      }
-
-      // Get addresses near point using spatial query
-      const addresses = await this.mapAddressModel
-        .find(query)
-        .select('_id type geometry properties')
-        .lean()
-        .exec();
-
-      const transformedAddresses =
-        addresses?.map((address) => ({
-          ...address,
-          _id: address._id?.toString(),
-        })) || [];
-
-      return {
-        type: 'FeatureCollection',
-        features: transformedAddresses,
-      };
-    } catch (error) {
-      throw new Error(`Failed to fetch addresses near point: ${error.message}`);
-    }
   }
 }
