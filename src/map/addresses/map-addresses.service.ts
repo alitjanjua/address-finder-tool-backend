@@ -7,11 +7,7 @@ import {
   MapAddressResponseDto,
 } from './dto/map-address-response.dto';
 import { MapAddress, MapAddressDocument } from './schemas/map-address.schema';
-import {
-  MultiPolygonDto,
-  PolygonDto,
-  WithinRegionRequestDto,
-} from './dto/spatial-query.dto';
+import { PolygonDto, WithinRegionRequestDto } from './dto/spatial-query.dto';
 import stringSimilarity from 'string-similarity';
 
 @Injectable()
@@ -153,16 +149,14 @@ export class MapAddressesService {
       const batchSize = body.batchSize ?? body.limit ?? 500;
 
       // Decide the geometry source
-      let region: PolygonDto | MultiPolygonDto | undefined;
+      let region: PolygonDto | undefined;
 
       if (body.searchRegion) {
         region = this.parseWktRegion(body.searchRegion);
       }
 
       if (!region) {
-        throw new Error(
-          'searchRegion (WKT POLYGON/MULTIPOLYGON) must be provided.',
-        );
+        throw new Error('searchRegion (WKT POLYGON) must be provided.');
       }
 
       const query: any = {
@@ -207,8 +201,8 @@ export class MapAddressesService {
     }
   }
 
-  // Minimal WKT parser for POLYGON and MULTIPOLYGON
-  private parseWktRegion(wkt: string): PolygonDto | MultiPolygonDto {
+  // Minimal WKT parser for POLYGON only
+  private parseWktRegion(wkt: string): PolygonDto {
     const trimmed = wkt.trim();
     const upper = trimmed.toUpperCase();
 
@@ -224,24 +218,7 @@ export class MapAddressesService {
       return { type: 'Polygon', coordinates: rings };
     }
 
-    if (upper.startsWith('MULTIPOLYGON')) {
-      // MULTIPOLYGON(((...)),((...)))
-      const polysStr = trimmed
-        .replace(/^\s*MULTIPOLYGON\s*\(\(\(/i, '')
-        .replace(/\)\)\)\s*$/i, '');
-
-      // Split polygons by ')),((', then parse rings within each
-      const polygonParts = polysStr.split(/\)\)\s*,\s*\(\(/);
-      const polygons = polygonParts.map((polyStr) => {
-        const ringParts = this.splitRings(polyStr);
-        const rings = ringParts.map((part) => this.parseCoordinates(part));
-        return rings;
-      });
-
-      return { type: 'MultiPolygon', coordinates: polygons };
-    }
-
-    throw new Error('Unsupported WKT type. Use POLYGON or MULTIPOLYGON.');
+    throw new Error('Unsupported WKT type. Use POLYGON.');
   }
 
   private splitRings(ringsStr: string): string[] {

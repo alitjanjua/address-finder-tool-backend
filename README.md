@@ -62,9 +62,9 @@
   - Example:
     - `curl "http://localhost:3000/api/map/addresses?searchQuery=Johanna%20van%20Burenlaan&limit=50"`
 
-- `POST /api/map/addresses/within-polygon` — addresses inside a WKT polygon/multipolygon
+- `POST /api/map/addresses/within-polygon` — addresses inside a WKT polygon
   - Body (JSON):
-    - `searchRegion` WKT string for `POLYGON(...)` or `MULTIPOLYGON(...)`
+    - `searchRegion` WKT string for `POLYGON(...)`
     - `limit` optional result cap (default `1000`)
     - `batchSize` optional pagination window
     - `cursor` optional last `_id` from previous batch

@@ -33,7 +33,7 @@ export class MapAddressesController {
   }
 
   @ApiOperation({
-    summary: 'Get addresses within a WKT polygon or multipolygon',
+    summary: 'Get addresses within a WKT polygon',
   })
   @ApiResponse({
     status: 200,
