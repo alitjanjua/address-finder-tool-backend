@@ -1,18 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { MapAddressesFilterDto } from './dto/map-addresses-filter.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
 import {
   MapAddressBatchResponseDto,
   MapAddressResponseDto,
 } from './dto/map-address-response.dto';
 import { MapAddress, MapAddressDocument } from './schemas/map-address.schema';
-import {
-  MultiPolygonDto,
-  PolygonDto,
-  WithinRegionRequestDto,
-} from './dto/spatial-query.dto';
+import { PolygonDto, WithinRegionRequestDto } from './dto/spatial-query.dto';
+import stringSimilarity from 'string-similarity';
 
 @Injectable()
 export class MapAddressesService {
@@ -23,58 +19,122 @@ export class MapAddressesService {
 
   async getAddresses(
     searchQuery: SearchQueryDto,
-    limit: number = 100,
+    limit = 100,
   ): Promise<MapAddressResponseDto> {
     try {
-      // Build MongoDB query based on search query only
-      const query: any = {};
+      const { searchQuery: searchStr } = searchQuery;
+      const fields = [
+        'properties.street',
+        'properties.number',
+        'properties.postcode',
+        'properties.city',
+      ];
 
-      // Handle searchQuery - match substrings across multiple fields
-      if (searchQuery.searchQuery) {
-        const raw = searchQuery.searchQuery.toLowerCase();
-        // Split on non-alphanumeric separators to support inputs like "App, gedam, pinge"
-        const terms = raw
-          .split(/[^a-z0-9]+/i)
-          .map((t) => t.trim())
-          .filter((t) => t.length > 0);
-
-        const fields = [
-          'properties.city',
-          'properties.street',
-          'properties.postcode',
-          'properties.district',
-          'properties.region',
-        ];
-
-        const escapeRegExp = (s: string) =>
-          s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regexes = terms.map((t) => new RegExp(escapeRegExp(t), 'i'));
-
-        if (regexes.length > 0) {
-          // OR across all term-field combinations so any substring matches
-          query.$or = fields.flatMap((field) =>
-            regexes.map((rx) => ({ [field]: rx })),
-          );
-        }
+      // No search input → return early
+      if (!searchStr || !searchStr.trim()) {
+        return { type: 'FeatureCollection', features: [] };
       }
 
-      // Get addresses from MongoDB with limit for better performance
-      const addresses = await this.mapAddressModel
+      const normalizedSearch = searchStr.trim().toLowerCase();
+
+      // Tokenize search to allow multi-word precision filtering
+      const tokens = normalizedSearch
+        .split(/[^a-z0-9]+/i)
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0);
+
+      const escapeRegExp = (s: string) =>
+        s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+      // Build query: require all tokens to appear somewhere ($and of per-token $or)
+      const query =
+        tokens.length > 0
+          ? {
+              $and: tokens.map((t) => {
+                const rx = new RegExp(escapeRegExp(t), 'i');
+                return { $or: fields.map((f) => ({ [f]: rx })) };
+              }),
+            }
+          : { $or: [] };
+
+      // Pull a larger pool so we can rank them by similarity
+      const candidates = await this.mapAddressModel
         .find(query)
         .select('_id type geometry properties')
-        .limit(limit)
-        .lean()
-        .exec();
+        .limit(Math.max(limit * 2, 100))
+        .lean();
 
-      const transformedAddresses =
-        addresses?.map((address) => ({
-          ...address,
-          _id: address._id?.toString(),
-        })) || [];
+      if (candidates.length === 0) {
+        return { type: 'FeatureCollection', features: [] };
+      }
 
+      // Step 2️⃣: Compute similarity scores with field weighting and prefix boost
+      const scored = candidates.map((addr) => {
+        const street = String(addr.properties.street || '').toLowerCase();
+        const number = String(addr.properties.number || '').toLowerCase();
+        const postcode = String(addr.properties.postcode || '').toLowerCase();
+        const city = String(addr.properties.city || '').toLowerCase();
+
+        const combined = [street, number, postcode, city]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+
+        const combinedScore = stringSimilarity.compareTwoStrings(
+          normalizedSearch,
+          combined,
+        );
+
+        // Field-level scores with weights to emphasize street/city
+        const weights = { street: 1.0, city: 0.9, postcode: 0.8, number: 0.5 };
+        const fieldScores = [
+          stringSimilarity.compareTwoStrings(normalizedSearch, street) *
+            weights.street,
+          stringSimilarity.compareTwoStrings(normalizedSearch, city) *
+            weights.city,
+          stringSimilarity.compareTwoStrings(normalizedSearch, postcode) *
+            weights.postcode,
+          stringSimilarity.compareTwoStrings(normalizedSearch, number) *
+            weights.number,
+        ];
+        const maxFieldScore = Math.max(...fieldScores);
+
+        // Prefix boost when any field starts with the full query
+        const startsWith = [street, number, postcode, city].some((t) =>
+          t.startsWith(normalizedSearch),
+        );
+        const prefixBoost = startsWith ? 0.15 : 0;
+
+        const score = Math.min(
+          1,
+          Math.max(combinedScore, maxFieldScore) + prefixBoost,
+        );
+
+        return { ...addr, score };
+      });
+
+      // Step 3️⃣: Sort by similarity
+      scored.sort((a, b) => b.score - a.score);
+
+      // Step 4️⃣: Determine threshold
+      // If any candidate is a "close match" (e.g., score >= 0.75), use only those.
+      const bestScore = scored[0].score;
+      const threshold = 0.75;
+
+      const closeMatches =
+        bestScore >= threshold
+          ? scored
+              .filter((s) => s.score >= Math.max(0.7, bestScore - 0.08))
+              .slice(0, limit)
+          : scored.slice(0, limit); // fallback to broader substring/fuzzy matches
+
+      // Step 5️⃣: Transform response
       return {
         type: 'FeatureCollection',
-        features: transformedAddresses,
+        features: closeMatches.map((a) => ({
+          ...a,
+          _id: a._id.toString(),
+        })),
       };
     } catch (error) {
       throw new Error(`Failed to fetch map addresses: ${error.message}`);
@@ -89,16 +149,14 @@ export class MapAddressesService {
       const batchSize = body.batchSize ?? body.limit ?? 500;
 
       // Decide the geometry source
-      let region: PolygonDto | MultiPolygonDto | undefined;
+      let region: PolygonDto | undefined;
 
       if (body.searchRegion) {
         region = this.parseWktRegion(body.searchRegion);
       }
 
       if (!region) {
-        throw new Error(
-          'searchRegion (WKT POLYGON/MULTIPOLYGON) must be provided.',
-        );
+        throw new Error('searchRegion (WKT POLYGON) must be provided.');
       }
 
       const query: any = {
@@ -143,8 +201,8 @@ export class MapAddressesService {
     }
   }
 
-  // Minimal WKT parser for POLYGON and MULTIPOLYGON
-  private parseWktRegion(wkt: string): PolygonDto | MultiPolygonDto {
+  // Minimal WKT parser for POLYGON only
+  private parseWktRegion(wkt: string): PolygonDto {
     const trimmed = wkt.trim();
     const upper = trimmed.toUpperCase();
 
@@ -160,24 +218,7 @@ export class MapAddressesService {
       return { type: 'Polygon', coordinates: rings };
     }
 
-    if (upper.startsWith('MULTIPOLYGON')) {
-      // MULTIPOLYGON(((...)),((...)))
-      const polysStr = trimmed
-        .replace(/^\s*MULTIPOLYGON\s*\(\(\(/i, '')
-        .replace(/\)\)\)\s*$/i, '');
-
-      // Split polygons by ')),((', then parse rings within each
-      const polygonParts = polysStr.split(/\)\)\s*,\s*\(\(/);
-      const polygons = polygonParts.map((polyStr) => {
-        const ringParts = this.splitRings(polyStr);
-        const rings = ringParts.map((part) => this.parseCoordinates(part));
-        return rings;
-      });
-
-      return { type: 'MultiPolygon', coordinates: polygons };
-    }
-
-    throw new Error('Unsupported WKT type. Use POLYGON or MULTIPOLYGON.');
+    throw new Error('Unsupported WKT type. Use POLYGON.');
   }
 
   private splitRings(ringsStr: string): string[] {
@@ -196,97 +237,5 @@ export class MapAddressesService {
       }
       return [lon, lat];
     });
-  }
-
-  async getAddressesNearPoint(
-    point: [number, number],
-    maxDistance: number = 1000, // in meters
-    additionalFilters?: MapAddressesFilterDto,
-  ): Promise<MapAddressResponseDto> {
-    try {
-      // Build MongoDB query with spatial filter
-      const query: any = {
-        geometry: {
-          $near: {
-            $geometry: {
-              type: 'Point',
-              coordinates: point,
-            },
-            $maxDistance: maxDistance,
-          },
-        },
-      };
-
-      // Add additional filters if provided
-      if (additionalFilters) {
-        if (additionalFilters.city && additionalFilters.city.length > 0) {
-          const cityRegex = additionalFilters.city.map(
-            (city) => new RegExp(city.toLowerCase(), 'i'),
-          );
-          query['properties.city'] = { $in: cityRegex };
-        }
-
-        if (additionalFilters.street && additionalFilters.street.length > 0) {
-          const streetRegex = additionalFilters.street.map(
-            (street) => new RegExp(street.toLowerCase(), 'i'),
-          );
-          query['properties.street'] = { $in: streetRegex };
-        }
-
-        if (
-          additionalFilters.postcode &&
-          additionalFilters.postcode.length > 0
-        ) {
-          const postcodeRegex = additionalFilters.postcode.map(
-            (postcode) => new RegExp(postcode.toLowerCase(), 'i'),
-          );
-          query['properties.postcode'] = { $in: postcodeRegex };
-        }
-
-        if (
-          additionalFilters.district &&
-          additionalFilters.district.length > 0
-        ) {
-          const districtRegex = additionalFilters.district.map(
-            (district) => new RegExp(district.toLowerCase(), 'i'),
-          );
-          query['properties.district'] = { $in: districtRegex };
-        }
-
-        if (additionalFilters.region && additionalFilters.region.length > 0) {
-          const regionRegex = additionalFilters.region.map(
-            (region) => new RegExp(region.toLowerCase(), 'i'),
-          );
-          query['properties.region'] = { $in: regionRegex };
-        }
-
-        if (additionalFilters.number) {
-          query['properties.number'] = {
-            $regex: additionalFilters.number,
-            $options: 'i',
-          };
-        }
-      }
-
-      // Get addresses near point using spatial query
-      const addresses = await this.mapAddressModel
-        .find(query)
-        .select('_id type geometry properties')
-        .lean()
-        .exec();
-
-      const transformedAddresses =
-        addresses?.map((address) => ({
-          ...address,
-          _id: address._id?.toString(),
-        })) || [];
-
-      return {
-        type: 'FeatureCollection',
-        features: transformedAddresses,
-      };
-    } catch (error) {
-      throw new Error(`Failed to fetch addresses near point: ${error.message}`);
-    }
   }
 }
