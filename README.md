@@ -17,7 +17,6 @@
 - `src/map/addresses/map-addresses.service.ts` search + spatial logic
 - `src/map/addresses/dto/` request/response DTOs
 - `src/database/` configuration and (optional) seeds
-- `files/addresses.geojson` sample data for seeding
 - `dist/` compiled output from `yarn build`
 
 **Prerequisites**
@@ -47,10 +46,6 @@
 **Run**
 - `yarn start` for production build (`dist`)
 - `yarn start:dev` for watch mode (TypeScript)
-
-**Seeding (Optional)**
-- Load sample data from `files/addresses.geojson`:
-- `yarn seed:map-addresses`
 
 **API Overview**
 - Base path: `/api`
